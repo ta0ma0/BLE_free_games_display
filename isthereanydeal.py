@@ -3,12 +3,18 @@ import json
 from datetime import datetime
 from dotenv import load_dotenv
 import os
+from bt_sender import send_list_via_bluetooth
+import asyncio
+import glob
+
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # папка где лежит скрипт
 ENV_PATH = os.path.join(".env")
 load_dotenv(ENV_PATH)
 
 # --- КОНФИГУРАЦИЯ ---
-API_KEY = os.getenv("API_KEY")  # Замените на свой ключ!
+API_KEY = os.getenv("API_KEY_ITRAD")  # Замените на свой ключ!
+print(API_KEY)
 COUNTRY = "RU"          # Код страны (ISO 3166-1 alpha-2)
 SHOPS = "61,16,35"      # ID магазинов: 61=Steam, 62=Epic, 35=GOG
 LIMIT = 10              # Количество сделок (1-200)
@@ -16,6 +22,42 @@ LIMIT = 10              # Количество сделок (1-200)
 
 BASE_URL = "https://api.isthereanydeal.com"
 HEADERS = {"User-Agent": "FreeGamesScript/1.0"}
+
+def cleanup_files(pattern: str, keep_count: int = 2):
+    """
+    Находит все файлы, соответствующие шаблону, и удаляет все, 
+    кроме указанного количества самых новых.
+
+    :param pattern: Шаблон для поиска файлов (например, 'deals_full_*.json').
+    :param keep_count: Количество самых новых файлов, которые нужно оставить.
+    """
+    print("\n--- Запуск очистки старых файлов ---")
+    
+    # 1. Находим все файлы, соответствующие шаблону
+    files = glob.glob(pattern)
+    
+    # 2. Проверяем, нужно ли что-то делать
+    if len(files) <= keep_count:
+        print(f"Найдено {len(files)} файлов по шаблону '{pattern}'. Очистка не требуется.")
+        return
+
+    # 3. Сортируем файлы по времени их последнего изменения (от новых к старым)
+    files.sort(key=os.path.getmtime, reverse=True)
+    
+    # 4. Определяем, какие файлы нужно удалить
+    files_to_delete = files[keep_count:]
+    
+    print(f"Найдено {len(files)} файлов. Будет сохранено {keep_count} новых и удалено {len(files_to_delete)} старых.")
+    
+    # 5. Удаляем старые файлы
+    for f in files_to_delete:
+        try:
+            os.remove(f)
+            print(f"  - Удален файл: {f}")
+        except OSError as e:
+            print(f"  - Ошибка при удалении файла {f}: {e}")
+            
+    print("--- Очистка завершена ---")  
 
 def get_deals_list(limit=10, offset=0):
     """
@@ -168,7 +210,7 @@ def save_results(all_data, free_data, timestamp):
             json.dump(free_data, f, ensure_ascii=False, indent=2)
         print(f"💾 Бесплатные игры сохранены в: {filename}")
 
-def main():
+def get_games():
     print("=" * 50)
     print("ПОИСК БЕСПЛАТНЫХ ИГР - IsThereAnyDeal API")
     print("=" * 50)
@@ -201,10 +243,26 @@ def main():
     
     # 4. Выводим список найденных бесплатных игр
     if free_games:
+        today_games_list = []
         print("\n🎮 Найденные бесплатные игры:")
         for i, game in enumerate(free_games, 1):
             reason = game.get("free_reason", "бесплатно")
             print(f"{i}. {game.get('title')} в {game.get('shop', {}).get('name', '?')} ({reason})")
+            if game.get('shop').get('name') == "Epic Game Store":
+                game_name = "Epic"
+            today_games_list.append(f"{i}.{game.get('title')}|{game_name}")
+    with open('today_free_games.txt', 'w') as f:
+        for i in today_games_list:
+            f.write(i + '\n')
+    return today_games_list
+
+async def main():
+    games_to_send = get_games()
+#     # Предположим, этот список мы получили из другого места
+    await send_list_via_bluetooth(games_to_send)
+    cleanup_files(pattern='deals_full_*.json', keep_count=2)
+    cleanup_files(pattern='free_games_*.json', keep_count=2)
+
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

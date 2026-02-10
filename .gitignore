@@ -1,2 +1,4 @@
 venv/
 .env
+deals*.json
+free*.json
