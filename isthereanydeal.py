@@ -253,6 +253,7 @@ def get_games():
             today_games_list.append(f"{i}.{game.get('title')}|{game_name}")
     elif free_games == None:
         today_games_list = ["!ALARM, ALARM! Возникла проблема!", "isthereanydeal.com вернул ошибку или пустой список", "Проверьте интерет", "Проверьте доступность сайта", "Попейте чай"]
+        return today_games_list
     with open('today_free_games.txt', 'w') as f:
         for i in today_games_list:
             f.write(i + '\n')
