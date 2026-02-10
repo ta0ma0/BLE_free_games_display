@@ -7,265 +7,182 @@ from bt_sender import send_list_via_bluetooth
 import asyncio
 import glob
 
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # папка где лежит скрипт
-ENV_PATH = os.path.join(".env")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_PATH = os.path.join(BASE_DIR, ".env") # Лучше указывать полный путь
 load_dotenv(ENV_PATH)
 
 # --- КОНФИГУРАЦИЯ ---
-API_KEY = os.getenv("API_KEY_ITRAD")  # Замените на свой ключ!
-print(API_KEY)
-COUNTRY = "RU"          # Код страны (ISO 3166-1 alpha-2)
-SHOPS = "61,16,35"      # ID магазинов: 61=Steam, 62=Epic, 35=GOG
-LIMIT = 10              # Количество сделок (1-200)
+API_KEY = os.getenv("API_KEY_ITRAD")
+print(f"API KEY: {API_KEY}") # Для отладки
+COUNTRY = "RU"
+SHOPS = "61,16,35"
+LIMIT = 10
 # --- КОНЕЦ КОНФИГУРАЦИИ ---
 
 BASE_URL = "https://api.isthereanydeal.com"
 HEADERS = {"User-Agent": "FreeGamesScript/1.0"}
 
 def cleanup_files(pattern: str, keep_count: int = 2):
-    """
-    Находит все файлы, соответствующие шаблону, и удаляет все, 
-    кроме указанного количества самых новых.
-
-    :param pattern: Шаблон для поиска файлов (например, 'deals_full_*.json').
-    :param keep_count: Количество самых новых файлов, которые нужно оставить.
-    """
-    print("\n--- Запуск очистки старых файлов ---")
-    
-    # 1. Находим все файлы, соответствующие шаблону
+    """Очистка старых файлов"""
+    print(f"\n--- Очистка файлов по шаблону: {pattern} ---")
     files = glob.glob(pattern)
-    
-    # 2. Проверяем, нужно ли что-то делать
     if len(files) <= keep_count:
-        print(f"Найдено {len(files)} файлов по шаблону '{pattern}'. Очистка не требуется.")
         return
 
-    # 3. Сортируем файлы по времени их последнего изменения (от новых к старым)
     files.sort(key=os.path.getmtime, reverse=True)
-    
-    # 4. Определяем, какие файлы нужно удалить
     files_to_delete = files[keep_count:]
     
-    print(f"Найдено {len(files)} файлов. Будет сохранено {keep_count} новых и удалено {len(files_to_delete)} старых.")
-    
-    # 5. Удаляем старые файлы
     for f in files_to_delete:
         try:
             os.remove(f)
-            print(f"  - Удален файл: {f}")
+            print(f"  - Удален: {f}")
         except OSError as e:
-            print(f"  - Ошибка при удалении файла {f}: {e}")
-            
-    print("--- Очистка завершена ---")  
+            print(f"  - Ошибка: {e}")
 
 def get_deals_list(limit=10, offset=0):
-    """
-    Получает список текущих сделок через эндпоинт /v01/deals/
-    с правильными параметрами из документации
-    """
+    """Получает список сделок"""
     endpoint = f"{BASE_URL}/deals/v2"
-    
     params = {
         "key": API_KEY,
         "country": COUNTRY,
         "offset": offset,
         "limit": limit,
-        "sort": "price",           # Сортировка по низкой цене
-        "nondeals": "false",       # Не включать неакционные цены
-        "mature": "false",         # Не включать контент для взрослых
-        "shops": SHOPS,            # ID магазинов через запятую
+        "sort": "price",
+        "nondeals": "false",
+        "mature": "false",
+        "shops": SHOPS,
     }
     
-    print("📡 Запрос к API с параметрами:")
-    print(f"   URL: {endpoint}")
-    print(f"   Страна: {COUNTRY}")
-    print(f"   Магазины: {SHOPS}")
-    print(f"   Лимит: {limit}")
-    print(f"   Сортировка: по цене (от низкой к высокой)")
-    
     try:
-        response = requests.get(endpoint, headers=HEADERS, params=params)
-        print(f"📊 Статус ответа: {response.status_code}")
+        print(f"📡 Запрос к API...")
+        response = requests.get(endpoint, headers=HEADERS, params=params, timeout=10)
+        print(f"📊 Статус: {response.status_code}")
         
         if response.status_code == 200:
             return response.json()
-        elif response.status_code == 401:
-            print("❌ Ошибка 401: Неверный API ключ")
-            print("   Получите ключ на https://isthereanydeal.com/app/")
         elif response.status_code == 403:
-            print("❌ Ошибка 403: Доступ запрещен")
+            print("❌ Ошибка 403: Доступ запрещен (проверьте API Key/IP)")
         else:
-            print(f"❌ Ошибка {response.status_code}: {response.text[:200]}")
-        
+            print(f"❌ Ошибка {response.status_code}")
         return None
     except requests.exceptions.RequestException as e:
         print(f"❌ Ошибка соединения: {e}")
         return None
 
 def analyze_deals(data):
-    """
-    Анализирует полученные сделки и фильтрует бесплатные игры
-    """
+    """Фильтрует бесплатные игры"""
     if not data or "list" not in data:
-        print("❌ Некорректный формат ответа - отсутствует 'list'")
         return []
     
     deals = data["list"]
-    print(f"\n📊 Получено сделок: {len(deals)}")
-    
     free_games = []
     
-    for i, deal in enumerate(deals, 1):
-        # Извлекаем основные данные об игре
-        title = deal.get("title", "Без названия")
-        game_id = deal.get("id", "")
-        slug = deal.get("slug", "")
-        
-        # Извлекаем данные о сделке
+    for deal in deals:
         deal_info = deal.get("deal", {})
-        
-        # Получаем информацию о магазине
-        shop_info = deal_info.get("shop", {})
-        shop_name = shop_info.get("name", "Неизвестно")
-        shop_id = shop_info.get("id", 0)
-        
-        # Получаем информацию о цене
-        price_info = deal_info.get("price", {})
-        price_amount = price_info.get("amount", 1)  # По умолчанию 1, чтобы не попало в бесплатные
-        
-        regular_info = deal_info.get("regular", {})
-        regular_amount = regular_info.get("amount", 0)
-        
-        # Получаем скидку
+        price_amount = deal_info.get("price", {}).get("amount", 1)
+        regular_amount = deal_info.get("regular", {}).get("amount", 0)
         cut = deal_info.get("cut", 0)
         
-        # Получаем дату истечения
-        expiry = deal_info.get("expiry")
-        
-        # Получаем ссылку на сделку
-        deal_url = deal_info.get("url", "")
-        
-        print(f"\n{i}. {title}")
-        print(f"   Магазин: {shop_name} (ID: {shop_id})")
-        print(f"   Цена: ${price_amount}")
-        print(f"   Обычная цена: ${regular_amount}")
-        print(f"   Скидка: {cut}%")
-        print(f"   Истекает: {expiry if expiry else 'Нет даты'}")
-        
-        # Критерии для фильтрации бесплатных раздач:
-        # 1. Текущая цена = 0
-        # 2. Обычная цена > 0 (чтобы исключить free-to-play)
-        # 3. Скидка = 100% (опционально, но хороший индикатор)
-        
+        # Логика бесплатности
         if price_amount == 0 and regular_amount > 0:
-            if cut == 100:
-                print(f"   🎁 БЕСПЛАТНАЯ РАЗДАЧА (скидка 100%)")
-                tag = "бесплатная раздача"
-            else:
-                print(f"   ⚠️  Бесплатно, но скидка {cut}%")
-                tag = "бесплатная акция"
+            tag = "бесплатно"
+            if cut == 100: tag = "100% скидка"
             
-            # Формируем структурированные данные о бесплатной игре
-            free_game_data = {
-                "title": title,
-                "id": game_id,
-                "slug": slug,
-                "shop": {
-                    "id": shop_id,
-                    "name": shop_name
-                },
-                "price": {
-                    "current": price_amount,
-                    "regular": regular_amount,
-                    "currency": price_info.get("currency", "USD"),
-                    "cut": cut
-                },
-                "expiry": expiry,
-                "url": deal_url,
-                "timestamp": deal_info.get("timestamp"),
-                "assets": deal.get("assets", {}),
-                "type": deal.get("type", "unknown"),
-                "free_reason": tag
-            }
+            shop_name = deal_info.get("shop", {}).get("name", "Shop")
             
-            free_games.append(free_game_data)
+            free_games.append({
+                "title": deal.get("title", "NoName"),
+                "shop_name": shop_name,
+                "reason": tag
+            })
     
     return free_games
 
-def save_results(all_data, free_data, timestamp):
-    """Сохраняет результаты в JSON файлы"""
-    
-    # Сохраняем полный ответ
-    if all_data:
-        filename = f"deals_full_{timestamp}.json"
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(all_data, f, ensure_ascii=False, indent=2)
-        print(f"\n💾 Полные данные сохранены в: {filename}")
-    
-    # Сохраняем бесплатные игры
-    if free_data:
-        filename = f"free_games_{timestamp}.json"
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(free_data, f, ensure_ascii=False, indent=2)
-        print(f"💾 Бесплатные игры сохранены в: {filename}")
-
 def get_games():
     print("=" * 50)
-    print("ПОИСК БЕСПЛАТНЫХ ИГР - IsThereAnyDeal API")
+    print("ПОИСК БЕСПЛАТНЫХ ИГР")
     print("=" * 50)
     
-    # Проверка API ключа
-    if API_KEY == "ВАШ_КЛЮЧ_API_ЗДЕСЬ":
-        print("\n❌ ОШИБКА: Вы не заменили API_KEY!")
-        print("1. Зарегистрируйтесь на https://isthereanydeal.com")
-        print("2. Перейдите в https://isthereanydeal.com/app/")
-        print("3. Создайте приложение и получите API ключ")
-        print("4. Вставьте ключ в переменную API_KEY")
-        return
+    # 1. Запрос к API
+    response_data = get_deals_list(limit=LIMIT)
     
-    # 1. Получаем сделки
-    response_data = get_deals_list(limit=LIMIT, offset=0)
-    
-    if not response_data:
-        print("\n❌ Не удалось получить данные от API")
-        return
-    
-    # 2. Анализируем данные
+    # --- ОБРАБОТКА ОШИБОК ПОДКЛЮЧЕНИЯ/API ---
+    if response_data is None:
+        print("\n❌ Критическая ошибка API. Формирую сообщение для дисплея.")
+        # Возвращаем список ошибок для дисплея
+        return [
+            "! ОШИБКА СЕТИ !",
+            "Проверь Wi-Fi",
+            "или API Key",
+            "IsThereAnyDeal",
+            "Code: Error"
+        ]
+
+    # 2. Анализ данных
     free_games = analyze_deals(response_data)
     
-    print(f"\n{'='*50}")
-    print(f"ИТОГО: найдено {len(free_games)} бесплатных игр.")
+    today_games_list = [] # Инициализируем список
     
-    # 3. Сохраняем результаты
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    save_results(response_data, free_games, timestamp)
-    
-    # 4. Выводим список найденных бесплатных игр
     if free_games:
-        today_games_list = []
-        print("\n🎮 Найденные бесплатные игры:")
+        print(f"\n🎮 Найдено бесплатных игр: {len(free_games)}")
         for i, game in enumerate(free_games, 1):
-            reason = game.get("free_reason", "бесплатно")
-            print(f"{i}. {game.get('title')} в {game.get('shop', {}).get('name', '?')} ({reason})")
-            if game.get('shop').get('name') == "Epic Game Store":
-                game_name = "Epic"
-            today_games_list.append(f"{i}.{game.get('title')}|{game_name}")
-    elif free_games == None:
-        today_games_list = ["!ALARM, ALARM! Возникла проблема!", "isthereanydeal.com вернул ошибку или пустой список", "Проверьте интерет", "Проверьте доступность сайта", "Попейте чай"]
-        return today_games_list
-    with open('today_free_games.txt', 'w') as f:
-        for i in today_games_list:
-            f.write(i + '\n')
+            # Формируем строку
+            title = game['title']
+            shop = game['shop_name']
+            
+            # Упрощаем названия для дисплея, так как места мало
+            if "Epic" in shop:
+                display_shop = "EGS"
+            elif "Steam" in shop:
+                display_shop = "Steam"
+            elif "GOG" in shop:
+                display_shop = "GOG"
+            else:
+                display_shop = shop[:6] # Обрезаем длинные названия
+            
+            # Формат строки: "1.Игра|Магазин"
+            # Мы заменяем pipe на перенос или пробел на стороне дисплея, 
+            # или отправляем как есть, если модуль bt_sender разбивает.
+            # Если твоя ардуина ждет "Игра|Магазин", оставляем так.
+            # Если она просто печатает строку, лучше "1.Игра (Магазин)"
+            
+            line = f"{i}. {title} ({display_shop})"
+            today_games_list.append(line)
+            print(line)
+            
+    else:
+        print("Игры не найдены, список пуст.")
+        today_games_list = [
+            "Сегодня пусто :(",
+            "Халявы нет",
+            "Зайди позже",
+            "IsThereAnyDeal",
+            "0 Games"
+        ]
+
+    # Сохраняем текстовый файл локально (на всякий случай)
+    with open('today_free_games.txt', 'w', encoding='utf-8') as f:
+        for line in today_games_list:
+            f.write(line + '\n')
+            
     return today_games_list
 
 async def main():
+    # 1. Получаем список (игр или ошибок)
     games_to_send = get_games()
-#     # Предположим, этот список мы получили из другого места
-    await send_list_via_bluetooth(games_to_send)
+    
+    print("\n--- Подготовка к отправке ---")
+    print(games_to_send)
+    
+    # 2. Отправляем в любом случае (даже если там ошибки)
+    if games_to_send:
+        await send_list_via_bluetooth(games_to_send)
+    else:
+        print("Почему-то список пуст совсем. Ничего не отправляю.")
+
+    # 3. Уборка
     cleanup_files(pattern='deals_full_*.json', keep_count=2)
     cleanup_files(pattern='free_games_*.json', keep_count=2)
-
 
 if __name__ == "__main__":
     asyncio.run(main())

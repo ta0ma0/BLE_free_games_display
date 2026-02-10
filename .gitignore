@@ -2,3 +2,5 @@ venv/
 .env
 deals*.json
 free*.json
+today_free_games.txt
+*.log
