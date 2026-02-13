@@ -5,3 +5,5 @@ free*.json
 today_free_games.txt
 *.log
 logs/bluetooth_sender.log
+today_games.txt
+today_free_games.txt

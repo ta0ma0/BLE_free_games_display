@@ -6,6 +6,7 @@ import os
 from bt_sender import send_list_via_bluetooth
 import asyncio
 import glob
+import time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(BASE_DIR, ".env") # Лучше указывать полный путь
@@ -98,6 +99,28 @@ def analyze_deals(data):
     
     return free_games
 
+def write_games(games_list):
+    with open('today_games.txt', 'w') as f:
+        for i in games_list:
+            f.write(i + '\n')
+
+def read_games():
+    with open('today_games.txt', 'r') as f:
+        games_list = f.readlines()
+    return games_list
+
+async def repeat_cycle():
+    while True:
+        print("Вечный цикл отправки. Пауза 20 минут")
+        time.sleep(1200)
+        games_to_send = read_games()
+            # 2. Отправляем в любом случае (даже если там ошибки)
+        if games_to_send:
+            await send_list_via_bluetooth(games_to_send)
+        else:
+            print("Почему-то список пуст совсем. Ничего не отправляю.")
+
+
 def get_games():
     print("=" * 50)
     print("ПОИСК БЕСПЛАТНЫХ ИГР")
@@ -146,8 +169,9 @@ def get_games():
             # Если твоя ардуина ждет "Игра|Магазин", оставляем так.
             # Если она просто печатает строку, лучше "1.Игра (Магазин)"
             
-            line = f"{i}. {title} ({display_shop})"
+            line = f"{title} ({display_shop})"
             today_games_list.append(line)
+            write_games(today_games_list)
             print(line)
             
     else:
@@ -160,10 +184,7 @@ def get_games():
             "0 Games"
         ]
 
-    # Сохраняем текстовый файл локально (на всякий случай)
-    with open('today_free_games.txt', 'w', encoding='utf-8') as f:
-        for line in today_games_list:
-            f.write(line + '\n')
+        write_games(today_games_list)
             
     return today_games_list
 
@@ -180,9 +201,11 @@ async def main():
     else:
         print("Почему-то список пуст совсем. Ничего не отправляю.")
 
+
     # 3. Уборка
     cleanup_files(pattern='deals_full_*.json', keep_count=2)
     cleanup_files(pattern='free_games_*.json', keep_count=2)
+    await repeat_cycle()
 
 if __name__ == "__main__":
     asyncio.run(main())
