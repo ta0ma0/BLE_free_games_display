@@ -57,7 +57,8 @@ async def send_list_via_bluetooth(today_games_list: list):
             
             # 1. Отправка команды очистки экрана
             logging.info("Отправка команды очистки экрана (CLS)...")
-            await _send_line(client, "\n CLS")
+            await _send_line(client, "\n")
+            await _send_line(client, "CLS")
             
             # Ждем, пока экран реально очистится (черный прямоугольник)
             await asyncio.sleep(8.0) 
