@@ -6,3 +6,4 @@ today_free_games.txt
 *.log
 logs/bluetooth_sender.log
 __pycache__/*
+today_games.txt
