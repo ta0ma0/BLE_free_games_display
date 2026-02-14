@@ -112,14 +112,14 @@ def read_games():
 async def repeat_cycle():
     count = 0
     while True:
-        print("Вечный цикл отправки. Пауза 20 минут")
-        time.sleep(1200)
+        print("Вечный цикл отправки. Пауза 1 час")
+        time.sleep(3600)
         games_to_send = read_games()
             # 2. Отправляем в любом случае (даже если там ошибки)
         if games_to_send:
             await send_list_via_bluetooth(games_to_send)
             count += 1
-        elif count <= 40:
+        elif count <= 6:
             break
         else:
             print("Почему-то список пуст совсем. Ничего не отправляю.")
